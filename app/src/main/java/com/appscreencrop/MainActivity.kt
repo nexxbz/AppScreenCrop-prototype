@@ -40,7 +40,7 @@ class MainActivity : ComponentActivity() {
         val intent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
         return packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
             .map { LaunchableApp(it.loadLabel(packageManager).toString(), it.activityInfo.packageName) }
-            .filter { it.activityInfo.packageName != packageName }
+            .filter { it.packageName != this@MainActivity.packageName }
             .distinctBy { it.packageName }.sortedBy { it.label.lowercase() }
     }
 }
