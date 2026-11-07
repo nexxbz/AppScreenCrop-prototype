@@ -1,4 +1,13 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Acceso de uso: permite saber cuándo la app elegida está en primer plano -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
+    <!-- Opcional: solo se concede por ADB (pm grant). Sin él, "Resolución del sistema" será denegada por Android. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"/>
     <!-- Necesario en Android 11+ para ver las apps lanzables sin QUERY_ALL_PACKAGES -->
     <queries>
         <intent>
@@ -16,5 +25,13 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <service
+            android:name=".CropOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Muestra barras negras sobre la pantalla para recortar visualmente otra app"/>
+        </service>
     </application>
 </manifest>

@@ -1,13 +1,13 @@
-# AppScreen Crop — prototipo 0.1
+# AppScreen Crop — 0.3
 
-Android Kotlin + Jetpack Compose. Android 10+.
+Android Kotlin + Jetpack Compose. Android 10+. El recorte visual se aplica solo a la app elegida (p. ej. Xuper TV) y únicamente mientras está en primer plano (permisos: Mostrar sobre otras apps + Acceso de uso). Objetivo principal: **1280×800 (16:10)**; también 16:9 y 4:3. Orientación automática, horizontal o vertical; ajuste automático o manual conservando la proporción.
 
-Incluye interfaz azul oscuro, listado de aplicaciones lanzables, selección y apertura, controles iniciales automático/manual y workflow de GitHub Actions.
+## Dos métodos (ninguno simulado)
+- **Recorte visual:** superpone barras negras opacas sobre la otra app (permiso «Mostrar sobre otras apps»). No cambia la resolución del sistema; las zonas cubiertas no responden al tacto.
+- **Resolución del sistema:** ejecuta el equivalente a `wm size` / `wm density`. Cambia la resolución *lógica* del sistema, no el panel físico. Android solo lo permite con privilegios elevados (root, o permiso concedido por ADB). Si se deniega, la app lo informa y no cambia nada.
 
-**Limitación importante:** esta versión todavía no recorta ni redimensiona realmente otras aplicaciones. Android no permite que una app normal cambie directamente el tamaño de la ventana de otra. MediaProjection captura la pantalla, pero mostrarla encima de la app objetivo y conservar el tacto requiere una arquitectura adicional, permisos y pruebas específicas. No se afirma que esa función ya esté implementada.
+## Restauración
+Antes de cambiar nada se guardan en disco el tamaño y la densidad originales. El botón **Restaurar resolución original** los recupera y verifica. Tras aplicar, hay una cuenta atrás de 15 s para confirmar; si no confirmas, se restaura sola. Emergencia desde PC: `adb shell wm size reset` y `adb shell wm density reset`.
 
 ## Compilar en GitHub
-1. Sube el contenido del ZIP a un repositorio.
-2. Abre Actions.
-3. Ejecuta "Build AppScreen Crop".
-4. Descarga el artefacto `AppScreenCrop-debug`.
+Actions → «Build AppScreen Crop» → Run workflow → artefacto `AppScreenCrop-debug` (ZIP con `app-debug.apk`).
