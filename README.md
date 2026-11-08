@@ -11,3 +11,6 @@ Antes de cambiar nada se guardan en disco el tamaño y la densidad originales. E
 
 ## Compilar en GitHub
 Actions → «Build AppScreen Crop» → Run workflow → artefacto `AppScreenCrop-debug` (ZIP con `app-debug.apk`).
+
+## Modo TV (recomendado)
+Cambia la resolución lógica solo mientras la app elegida (p. ej. Xuper TV) está en primer plano y la restaura al salir. Necesita permiso elevado: **Shizuku** (sin PC en Android 11+), root o `pm grant ... WRITE_SECURE_SETTINGS` por ADB. Sin ese permiso Android lo niega y la app lo avisa sin cambiar nada.

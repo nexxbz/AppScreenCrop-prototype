@@ -62,7 +62,10 @@ class MainActivity : ComponentActivity() {
                     onStopOverlay = { stopService(Intent(this, CropOverlayService::class.java)) },
                     onApplySystem = { w, h, done -> runAsync({ displayCtl.apply(w, h) }, done) },
                     onRestore = { done -> runAsync({ displayCtl.restore() }, done) },
-                    onLaunch = { app -> launchApp(app) }
+                    onLaunch = { app -> launchApp(app) },
+                    elevatedState = { Elevated.state() },
+                    onRequestElevated = { Elevated.requestPermission() },
+                    onOpenShizuku = { openShizuku() }
                 )
             }
         }
@@ -81,7 +84,18 @@ class MainActivity : ComponentActivity() {
             .putExtra(CropOverlayService.EXTRA_RATIO, c.ratio)
             .putExtra(CropOverlayService.EXTRA_SCALE, c.scale)
             .putExtra(CropOverlayService.EXTRA_TARGET, c.target)
+            .putExtra(CropOverlayService.EXTRA_COVER, c.cover)
+            .putExtra(CropOverlayService.EXTRA_PREVIEW, c.previewMs)
+            .putExtra(CropOverlayService.EXTRA_SYSTEM, c.system)
+            .putExtra(CropOverlayService.EXTRA_W, c.sizeW)
+            .putExtra(CropOverlayService.EXTRA_H, c.sizeH)
         runCatching { startForegroundService(i) }
+    }
+
+    private fun openShizuku() {
+        val i = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+        if (i != null) startActivity(i)
+        else Toast.makeText(this, "Shizuku no está instalado. Búscalo en Google Play o en github.com/RikkaApps/Shizuku", Toast.LENGTH_LONG).show()
     }
 
     private fun launchApp(app: LaunchableApp) {
@@ -89,7 +103,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openWithCrop(app: LaunchableApp?, cfg: CropConfig): Boolean {
-        if (!Settings.canDrawOverlays(this)) {
+        if (!cfg.system && !Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "Activa «Mostrar sobre otras apps» para AppScreen Crop y vuelve a pulsar", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
             return false
@@ -139,25 +153,38 @@ private fun Home(
     onStopOverlay: () -> Unit,
     onApplySystem: (Int, Int, (DisplayController.Result) -> Unit) -> Unit,
     onRestore: ((DisplayController.Result) -> Unit) -> Unit,
-    onLaunch: (LaunchableApp) -> Unit
+    onLaunch: (LaunchableApp) -> Unit,
+    elevatedState: () -> Int,
+    onRequestElevated: () -> Unit,
+    onOpenShizuku: () -> Unit
 ) {
     var selected by remember { mutableStateOf<LaunchableApp?>(null) }
     var automatic by remember { mutableStateOf(true) }
     var ratio by remember { mutableStateOf("16:10") }
     var orientation by remember { mutableIntStateOf(0) }
     var scalePct by remember { mutableFloatStateOf(100f) }
+    var coverPct by remember { mutableFloatStateOf(100f) }
     var method by remember { mutableIntStateOf(0) }
     var active by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var elev by remember { mutableIntStateOf(elevatedState()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            elev = elevatedState()
+            delay(1500)
+        }
+    }
     var confirmSeconds by remember { mutableStateOf<Int?>(null) }
     var status by remember {
         mutableStateOf(if (pendingChange) "La app dejó una resolución modificada. Pulsa «Restaurar resolución original»." else "")
     }
 
     val scale = if (automatic) 1f else scalePct / 100f
-    val config = CropConfig(orientation, ratioOf(ratio), scale.coerceAtMost(1f), selected?.packageName)
+    val config = CropConfig(orientation, ratioOf(ratio), scale.coerceAtMost(1f), selected?.packageName, coverPct / 100f)
     val base = baseSize(ratioOf(ratio), scale)
     val target = if (orientation == 2) base.second to base.first else base
+
+    val activeConfig = if (method == 0) config.copy(system = true, sizeW = target.first, sizeH = target.second) else config
 
     val doRestore: () -> Unit = {
         busy = true
@@ -166,25 +193,36 @@ private fun Home(
 
     val applyNow: () -> Unit = {
         val app = selected
-        if (method == 0) {
-            if (app == null) {
-                status = "Selecciona la app (por ejemplo Xuper TV) para que el recorte se aplique solo en ella."
-            } else if (onOpenOverlay(app, config)) {
-                active = true
-                status = "Recorte activo solo en ${app.label}: ${target.first} × ${target.second}. Se muestra únicamente cuando esa app está en primer plano."
+        when (method) {
+            0 -> {
+                if (app == null) {
+                    status = "Selecciona la app (por ejemplo Xuper TV)."
+                } else if (onOpenOverlay(app, activeConfig)) {
+                    active = true
+                    status = "Modo TV para ${app.label}: se aplicará ${target.first} × ${target.second} solo mientras esté abierta y se restaurará al salir. Si Android no lo permite, verás un aviso."
+                }
             }
-        } else {
-            onStopOverlay(); active = false
-            busy = true; status = "Aplicando…"
-            onApplySystem(target.first, target.second) { r ->
-                busy = false; status = r.message
-                if (r.ok) confirmSeconds = 15
+            1 -> {
+                if (app == null) {
+                    status = "Selecciona la app (por ejemplo Xuper TV) para que el recorte se aplique solo en ella."
+                } else if (onOpenOverlay(app, config)) {
+                    active = true
+                    status = "Barras activas solo en ${app.label}: ${target.first} × ${target.second}. Se muestran únicamente cuando esa app está en primer plano."
+                }
+            }
+            else -> {
+                onStopOverlay(); active = false
+                busy = true; status = "Aplicando…"
+                onApplySystem(target.first, target.second) { r ->
+                    busy = false; status = r.message
+                    if (r.ok) confirmSeconds = 15
+                }
             }
         }
     }
 
-    LaunchedEffect(automatic, ratio, orientation, scalePct, selected) {
-        if (active && method == 0) onUpdateOverlay(config)
+    LaunchedEffect(automatic, ratio, orientation, scalePct, coverPct, selected) {
+        if (active && method <= 1) onUpdateOverlay(activeConfig)
     }
 
     val confirming = confirmSeconds != null
@@ -235,7 +273,11 @@ private fun Home(
                             }
                         }
                         Text(
-                            if (method == 0) "Se aplica solo a: ${selected?.label ?: "— elige una app abajo"}" else "Afecta a TODO el teléfono, no solo a una app",
+                            when (method) {
+                                0 -> "Modo TV: ${target.first} × ${target.second} solo mientras ${selected?.label ?: "la app elegida"} está abierta"
+                                1 -> "Barras negras solo sobre: ${selected?.label ?: "— elige una app abajo"}"
+                                else -> "Afecta a TODO el teléfono, no solo a una app"
+                            },
                             color = Soft, fontSize = 12.sp
                         )
                         Button(
@@ -279,14 +321,36 @@ private fun Home(
                     HorizontalDivider(color = Color(0xFF344968))
 
                     Text("Método", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    FilterChip(selected = method == 0, onClick = { method = 0 }, label = { Text("Solo en la app elegida (recomendado)") })
-                    FilterChip(selected = method == 1, onClick = { method = 1 }, label = { Text("Todo el sistema (avanzado)") })
+                    FilterChip(selected = method == 0, onClick = { method = 0 }, label = { Text("Modo TV solo en la app (recomendado)") })
+                    FilterChip(selected = method == 1, onClick = { method = 1 }, label = { Text("Barras negras (sin permisos especiales)") })
+                    FilterChip(selected = method == 2, onClick = { method = 2 }, label = { Text("Todo el sistema (avanzado)") })
                     Text(
-                        if (method == 0) "Superpone barras negras únicamente sobre la app elegida y solo mientras está abierta; en el resto del teléfono todo queda normal. Pide dos permisos: «Mostrar sobre otras apps» y «Acceso de uso». No cambia la resolución del sistema."
-                        else "Esto NO es por app: cambia la resolución LÓGICA de todo el sistema y ajusta la densidad en proporción. No modifica el panel físico. Requiere permiso elevado (ADB/root); si Android lo deniega, se te dirá y no se cambia nada. El resultado de la proporción (estirado o con bordes) depende del fabricante.",
+                        when (method) {
+                            0 -> "Cambia la resolución a ${target.first}×${target.second} únicamente mientras la app elegida está abierta y la restaura al salir. La app se reorganiza como en un Smart TV en lugar de quedar tapada. Cómo se ajusta a tu pantalla (estirada o con bordes) lo decide el fabricante. Requiere permiso elevado (Shizuku, root o ADB) y «Acceso de uso». Si Android lo niega, verás un aviso y no se cambia nada."
+                            1 -> "Superpone barras negras sobre la app elegida mientras está abierta. Solo tapa: no reorganiza la app, por eso puede cortar menús. Pide «Mostrar sobre otras apps» y «Acceso de uso»."
+                            else -> "Esto NO es por app: cambia la resolución LÓGICA de todo el sistema y ajusta la densidad en proporción. No modifica el panel físico. Requiere permiso elevado (ADB/root)."
+                        },
                         color = Soft, fontSize = 12.sp
                     )
 
+                    if (method != 1) {
+                        Surface(color = Color(0xFF1B2C49), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    "Permiso elevado (Shizuku): " + when (elev) { 2 -> "listo ✓"; 1 -> "falta conceder permiso"; else -> "Shizuku no está activo" },
+                                    color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp
+                                )
+                                when (elev) {
+                                    2 -> Text("Ya puedes usar el Modo TV sin PC.", color = Soft, fontSize = 12.sp)
+                                    1 -> Button(onClick = { onRequestElevated() }, modifier = Modifier.fillMaxWidth()) { Text("Conceder permiso a AppScreen Crop") }
+                                    else -> {
+                                        Text("1) Instala Shizuku. 2) Actívalo: en Android 11 o superior, con «Depuración inalámbrica» desde el propio teléfono; en Android 10 hace falta un PC con ADB tras cada reinicio. 3) Vuelve aquí y concede el permiso. Con root no necesitas Shizuku.", color = Soft, fontSize = 12.sp)
+                                        OutlinedButton(onClick = { onOpenShizuku() }, modifier = Modifier.fillMaxWidth()) { Text("Abrir Shizuku") }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Text("Modo de ajuste", color = Color.White, fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(selected = automatic, onClick = { automatic = true }, label = { Text("Automático") })
@@ -299,7 +363,7 @@ private fun Home(
                         FilterChip(selected = orientation == 1, onClick = { orientation = 1 }, label = { Text("Horizontal") })
                         FilterChip(selected = orientation == 2, onClick = { orientation = 2 }, label = { Text("Vertical") })
                     }
-                    if (method == 1) Text("En «Resolución del sistema», el tamaño se aplica en la orientación natural del dispositivo y gira con él.", color = Soft, fontSize = 12.sp)
+                    if (method != 1) Text("En los modos de resolución, el tamaño se aplica en la orientación natural del dispositivo y gira con él.", color = Soft, fontSize = 12.sp)
 
                     Text("Formato (se conserva la proporción)", color = Color(0xFFB9CBE4))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -310,10 +374,26 @@ private fun Home(
                     if (!automatic) {
                         Text("Escala del área: ${scalePct.toInt()}%", color = Color(0xFFB9CBE4))
                         Slider(value = scalePct, onValueChange = { scalePct = it }, valueRange = 50f..150f)
-                        if (method == 0) Text("En recorte visual, más de 100% equivale a 100% (el máximo que cabe en pantalla).", color = Soft, fontSize = 12.sp)
+                        if (method == 1) Text("En barras negras, más de 100% equivale a 100% (el máximo que cabe en pantalla).", color = Soft, fontSize = 12.sp)
                     }
 
-                    Text("Los ajustes se ven al abrir la app elegida (mientras estás en AppScreen Crop las barras se ocultan).", color = Soft, fontSize = 12.sp)
+                    if (method == 1) {
+                        Text("Ancho de las barras: ${coverPct.toInt()}%", color = Color(0xFFB9CBE4))
+                        Slider(value = coverPct, onValueChange = { coverPct = it }, valueRange = 0f..100f)
+                        Text("Las barras tapan una parte de la app. Si cortan menús o textos, baja este valor hasta que se vea todo.", color = Soft, fontSize = 12.sp)
+                        OutlinedButton(
+                            onClick = {
+                                if (selected == null) {
+                                    status = "Selecciona primero la app."
+                                } else if (onOpenOverlay(null, config.copy(previewMs = 5000L))) {
+                                    active = true
+                                    status = "Vista previa de 5 s sobre esta pantalla."
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Probar barras 5 s") }
+                    }
+                    Text("Los ajustes se ven al abrir la app elegida ; mientras estás en AppScreen Crop se ocultan, salvo en «Probar barras».", color = Soft, fontSize = 12.sp)
                     OutlinedButton(onClick = { onStopOverlay(); active = false }, modifier = Modifier.fillMaxWidth()) { Text("Quitar recorte visual") }
                 }
             }

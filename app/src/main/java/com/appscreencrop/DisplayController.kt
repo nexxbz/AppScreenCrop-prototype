@@ -27,7 +27,9 @@ class DisplayController(context: Context) {
     fun hasAppliedChange(): Boolean = prefs.getBoolean(K_APPLIED, false)
 
     // ---------- Aplicar ----------
-    fun apply(targetW: Int, targetH: Int): Result {
+    fun apply(targetW: Int, targetH: Int): Result = synchronized(LOCK) { applyInner(targetW, targetH) }
+
+    private fun applyInner(targetW: Int, targetH: Int): Result {
         val snap = snapshotOriginal()
         val short = minOf(targetW, targetH)
         val long = maxOf(targetW, targetH)
@@ -49,8 +51,8 @@ class DisplayController(context: Context) {
             return Result(
                 false,
                 "Android no permitió cambiar la resolución del sistema: la app no tiene permiso elevado " +
-                    "(ADB/root). No se modificó nada. Detalle: ${s.out.take(140).ifBlank { "sin detalle" }}. " +
-                    "Puedes usar «Recorte visual» o dar el permiso por ADB."
+                    "(Shizuku, ADB o root). No se modificó nada. Detalle: ${s.out.take(140).ifBlank { "sin detalle" }}. " +
+                    "Da el permiso una sola vez desde un PC: adb shell pm grant com.appscreencrop android.permission.WRITE_SECURE_SETTINGS (o usa root), o usa las barras negras."
             )
         }
         run("wm density $newDensity")
@@ -67,10 +69,12 @@ class DisplayController(context: Context) {
     }
 
     // ---------- Restaurar ----------
-    fun restore(): Result {
+    fun restore(): Result = synchronized(LOCK) { restoreInner() }
+
+    private fun restoreInner(): Result {
         val snap = loadSnapshot()
         if (!hasAppliedChange() || snap == null) {
-            return Result(true, "No hay ningún cambio de resolución hecho por esta app que restaurar.")
+            return Result(true, "La resolución ya está restaurada: no hay cambios pendientes de esta app.")
         }
         return if (restoreFrom(snap)) {
             prefs.edit().clear().commit()
@@ -151,6 +155,8 @@ class DisplayController(context: Context) {
     }
 
     private fun run(cmd: String): Sh {
+        val z = Elevated.exec(cmd)
+        if (z != null && z.first == 0 && !z.second.contains("Exception")) return Sh(z.first, z.second, "Shizuku")
         val a = exec("sh", "-c", cmd)
         if (a.code == 0 && !a.out.contains("Exception")) return a.copy(via = "shell directo")
         val b = exec("su", "-c", cmd)
@@ -159,6 +165,7 @@ class DisplayController(context: Context) {
     }
 
     companion object {
+        private val LOCK = Any()
         private const val K_APPLIED = "applied"
         private const val K_PW = "phys_w"
         private const val K_PH = "phys_h"

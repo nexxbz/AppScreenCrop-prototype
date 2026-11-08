@@ -23,10 +23,13 @@ import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.widget.Toast
+import kotlin.concurrent.thread
 import kotlin.math.roundToInt
 
 /** orientation: 0 = automática (sigue la rotación), 1 = horizontal, 2 = vertical. scale: 0.3..1 del área máxima. */
-data class CropConfig(val orientation: Int, val ratio: Float, val scale: Float, val target: String? = null)
+data class CropConfig(val orientation: Int, val ratio: Float, val scale: Float, val target: String? = null, val cover: Float = 1f, val previewMs: Long = 0L,
+    val system: Boolean = false, val sizeW: Int = 0, val sizeH: Int = 0)
 
 /** Dibuja hasta 4 barras negras (izq, arriba, der, abajo) sobre todas las apps. */
 class CropOverlayService : Service() {
@@ -36,6 +39,10 @@ class CropOverlayService : Service() {
     private var cfg = CropConfig(0, 16f / 10f, 1f)
     private val handler = Handler(Looper.getMainLooper())
     private var polling = false
+    private val displayCtl by lazy { DisplayController(this) }
+    private var sysApplied = false
+    private var sysBusy = false
+    private var previewUntil = 0L
     private var visible = false
     private var currentFg: String? = null
     private var lastQuery = 0L
@@ -60,7 +67,7 @@ class CropOverlayService : Service() {
             return START_NOT_STICKY
         }
         startAsForeground()
-        if (!Settings.canDrawOverlays(this)) {
+        if (intent?.getBooleanExtra(EXTRA_SYSTEM, false) != true && !Settings.canDrawOverlays(this)) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -68,8 +75,16 @@ class CropOverlayService : Service() {
             intent?.getIntExtra(EXTRA_ORIENT, 0) ?: 0,
             intent?.getFloatExtra(EXTRA_RATIO, 16f / 10f) ?: 16f / 10f,
             intent?.getFloatExtra(EXTRA_SCALE, 1f) ?: 1f,
-            intent?.getStringExtra(EXTRA_TARGET)
+            intent?.getStringExtra(EXTRA_TARGET),
+            intent?.getFloatExtra(EXTRA_COVER, 1f) ?: 1f,
+            0L,
+            intent?.getBooleanExtra(EXTRA_SYSTEM, false) ?: false,
+            intent?.getIntExtra(EXTRA_W, 0) ?: 0,
+            intent?.getIntExtra(EXTRA_H, 0) ?: 0
         )
+        if (!cfg.system && sysApplied) syncSystem(false)
+        val pm = intent?.getLongExtra(EXTRA_PREVIEW, 0L) ?: 0L
+        if (pm > 0L) previewUntil = System.currentTimeMillis() + pm
         if (visible) applyBars()
         if (!polling) {
             polling = true
@@ -88,7 +103,30 @@ class CropOverlayService : Service() {
         polling = false
         visible = false
         removeBars()
+        if (sysApplied) {
+            val c = displayCtl
+            thread { c.restore() }
+        }
         super.onDestroy()
+    }
+
+    private fun syncSystem(desired: Boolean) {
+        if (sysBusy || desired == sysApplied) return
+        sysBusy = true
+        val w = cfg.sizeW
+        val h = cfg.sizeH
+        thread {
+            val r = if (desired) displayCtl.apply(w, h) else displayCtl.restore()
+            handler.post {
+                sysBusy = false
+                if (r.ok) {
+                    sysApplied = desired
+                } else {
+                    Toast.makeText(this, r.message, Toast.LENGTH_LONG).show()
+                    stopSelf()
+                }
+            }
+        }
     }
 
     /** Detecta qué app está en primer plano (acceso de uso) y muestra las barras solo sobre la app elegida. */
@@ -106,7 +144,12 @@ class CropOverlayService : Service() {
             }
         } catch (e: Exception) {
         }
-        val show = cfg.target != null && currentFg == cfg.target
+        if (cfg.system) {
+            // Modo TV: la resolución cambia solo mientras la app elegida está en primer plano.
+            syncSystem(cfg.target != null && currentFg == cfg.target)
+            return
+        }
+        val show = now < previewUntil || (cfg.target != null && currentFg == cfg.target)
         if (show && !visible) {
             visible = true
             applyBars()
@@ -137,11 +180,18 @@ class CropOverlayService : Service() {
         val r = w - boxW - l
         val tp = (h - boxH) / 2
         val bt = h - boxH - tp
+        // «Ancho de las barras»: 100% = barras completas; menos = tapan menos de la app.
+        val k = cfg.cover.coerceIn(0f, 1f)
+        val l2 = (l * k).roundToInt()
+        val r2 = (r * k).roundToInt()
+        val t2 = (tp * k).roundToInt()
+        val b2 = (bt * k).roundToInt()
+        val midW = (w - l2 - r2).coerceAtLeast(0)
         try {
-            place(0, 0, 0, l, h)
-            place(1, l, 0, boxW, tp)
-            place(2, w - r, 0, r, h)
-            place(3, l, h - bt, boxW, bt)
+            place(0, 0, 0, l2, h)
+            place(1, l2, 0, midW, t2)
+            place(2, w - r2, 0, r2, h)
+            place(3, l2, h - b2, midW, b2)
         } catch (e: Exception) {
             removeBars()
             stopSelf()
@@ -222,6 +272,11 @@ class CropOverlayService : Service() {
         const val EXTRA_RATIO = "ratio"
         const val EXTRA_SCALE = "scale"
         const val EXTRA_TARGET = "target"
+        const val EXTRA_COVER = "cover"
+        const val EXTRA_SYSTEM = "system"
+        const val EXTRA_W = "size_w"
+        const val EXTRA_H = "size_h"
+        const val EXTRA_PREVIEW = "preview"
         private const val CHANNEL = "crop_overlay"
         private const val NOTIF_ID = 1
     }
