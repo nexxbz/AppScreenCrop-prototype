@@ -27,9 +27,10 @@ class DisplayController(context: Context) {
     fun hasAppliedChange(): Boolean = prefs.getBoolean(K_APPLIED, false)
 
     // ---------- Aplicar ----------
-    fun apply(targetW: Int, targetH: Int): Result = synchronized(LOCK) { applyInner(targetW, targetH) }
+    /** dpi = 0 → densidad automática (proporcional); si no, la densidad indicada (72–800). */
+    fun apply(targetW: Int, targetH: Int, dpi: Int = 0): Result = synchronized(LOCK) { applyInner(targetW, targetH, dpi) }
 
-    private fun applyInner(targetW: Int, targetH: Int): Result {
+    private fun applyInner(targetW: Int, targetH: Int, dpi: Int): Result {
         val snap = snapshotOriginal()
         val short = minOf(targetW, targetH)
         val long = maxOf(targetW, targetH)
@@ -45,7 +46,8 @@ class DisplayController(context: Context) {
         val naturalPortrait = snap.physH >= snap.physW
         val fw = if (naturalPortrait) short else long
         val fh = if (naturalPortrait) long else short
-        val newDensity = (snap.physDensity.toFloat() * short / physShort).roundToInt().coerceAtLeast(72)
+        val newDensity = if (dpi > 0) dpi.coerceIn(72, 800)
+            else (snap.physDensity.toFloat() * short / physShort).roundToInt().coerceAtLeast(72)
         val sizeStr = "${fw}x${fh}"
 
         val s = run("wm size $sizeStr")

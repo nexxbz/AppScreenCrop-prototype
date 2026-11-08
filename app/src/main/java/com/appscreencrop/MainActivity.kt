@@ -67,7 +67,7 @@ class MainActivity : ComponentActivity() {
                     onOpenOverlay = { app, cfg -> openWithCrop(app, cfg) },
                     onUpdateOverlay = { cfg -> startOverlay(cfg) },
                     onStopOverlay = { stopService(Intent(this, CropOverlayService::class.java)) },
-                    onApplySystem = { w, h, done -> runAsync({ displayCtl.apply(w, h) }, done) },
+                    onApplySystem = { w, h, dpi, done -> runAsync({ displayCtl.apply(w, h, dpi) }, done) },
                     onRestore = { done -> runAsync({ displayCtl.restore() }, done) },
                     onLaunch = { app -> launchApp(app) },
                     elevatedState = { Elevated.state() },
@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity() {
             .putExtra(CropOverlayService.EXTRA_SYSTEM, c.system)
             .putExtra(CropOverlayService.EXTRA_W, c.sizeW)
             .putExtra(CropOverlayService.EXTRA_H, c.sizeH)
+            .putExtra(CropOverlayService.EXTRA_DPI, c.dpi)
         runCatching { startForegroundService(i) }
     }
 
@@ -159,7 +160,7 @@ private fun Home(
     onOpenOverlay: (LaunchableApp?, CropConfig) -> Boolean,
     onUpdateOverlay: (CropConfig) -> Unit,
     onStopOverlay: () -> Unit,
-    onApplySystem: (Int, Int, (DisplayController.Result) -> Unit) -> Unit,
+    onApplySystem: (Int, Int, Int, (DisplayController.Result) -> Unit) -> Unit,
     onRestore: ((DisplayController.Result) -> Unit) -> Unit,
     onLaunch: (LaunchableApp) -> Unit,
     elevatedState: () -> Int,
@@ -175,6 +176,9 @@ private fun Home(
     var scalePct by remember { mutableFloatStateOf(100f) }
     var coverPct by remember { mutableFloatStateOf(100f) }
     var stretch by rememberSaveable { mutableStateOf(false) }
+    // Valores de la tablet del usuario: ancho mínimo 600 dp con 1280×800 → 213 dpi. «Auto» los borra.
+    var dpiText by rememberSaveable { mutableStateOf("213") }
+    var swText by rememberSaveable { mutableStateOf("600") }
     var method by remember { mutableIntStateOf(0) }
     var active by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -213,7 +217,10 @@ private fun Home(
         if (chosen.first >= chosen.second) pl to ps else ps to pl
     } else chosen
 
-    val activeConfig = if (method == 0) config.copy(system = true, sizeW = target.first, sizeH = target.second) else config
+    val dpiValue = dpiText.toIntOrNull()?.takeIf { it in 72..800 } ?: 0
+    val dpiInvalid = dpiText.isNotEmpty() && dpiValue == 0
+    val shortSide = minOf(target.first, target.second)
+    val activeConfig = if (method == 0) config.copy(system = true, sizeW = target.first, sizeH = target.second, dpi = dpiValue) else config
 
     val doRestore: () -> Unit = {
         busy = true
@@ -224,6 +231,8 @@ private fun Home(
         val app = selected
         if (isCustom && customSize == null) {
             status = "Escribe un ancho y un alto válidos (mínimo 320; máximo de este teléfono ${maxLong}×${maxShort})."
+        } else if (dpiInvalid && method != 1) {
+            status = "La densidad debe estar entre 72 y 800 dpi (o déjala vacía para automática)."
         } else when (method) {
             0 -> {
                 if (app == null) {
@@ -244,7 +253,7 @@ private fun Home(
             else -> {
                 onStopOverlay(); active = false
                 busy = true; status = "Aplicando…"
-                onApplySystem(target.first, target.second) { r ->
+                onApplySystem(target.first, target.second, dpiValue) { r ->
                     busy = false; status = r.message
                     if (r.ok) confirmSeconds = 15
                 }
@@ -252,7 +261,7 @@ private fun Home(
         }
     }
 
-    LaunchedEffect(automatic, ratio, customW, customH, orientation, scalePct, coverPct, selected, stretch) {
+    LaunchedEffect(automatic, ratio, customW, customH, orientation, scalePct, coverPct, selected, stretch, dpiText) {
         if (active && method <= 1) onUpdateOverlay(activeConfig)
     }
 
@@ -459,6 +468,38 @@ private fun Home(
                             }
                             Switch(checked = stretch, onCheckedChange = { stretch = it })
                         }
+                    }
+
+                    if (method != 1) {
+                        Text("Densidad (para que la app se acomode como en tu tablet)", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        OutlinedTextField(
+                            value = swText,
+                            onValueChange = { v ->
+                                swText = v.filter { c -> c.isDigit() }.take(4)
+                                swText.toIntOrNull()?.takeIf { it in 200..1500 }?.let { dpiText = (shortSide * 160f / it).roundToInt().toString() }
+                            },
+                            label = { Text("Ancho mínimo de la tablet (dp)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = dpiText,
+                            onValueChange = { v -> dpiText = v.filter { c -> c.isDigit() }.take(3) },
+                            label = { Text("Densidad en dpi (vacío = automática)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                            AssistChip(onClick = { dpiText = ""; swText = "" }, label = { Text("Auto") })
+                            listOf(160, 213, 240, 320).forEach { d -> AssistChip(onClick = { dpiText = "$d"; swText = "" }, label = { Text("$d dpi") }) }
+                        }
+                        Text(
+                            if (dpiValue > 0) "Con $dpiValue dpi el ancho mínimo queda en ${shortSide * 160 / dpiValue} dp. Si coincide con el de tu tablet, Xuper TV se acomodará igual."
+                            else "Automática: conserva el tamaño actual de los elementos del teléfono. Para copiar tu tablet: en ella, Ajustes → Opciones de desarrollador → «Ancho mínimo»; escribe ese número arriba y la densidad se calcula sola.",
+                            color = Soft, fontSize = 12.sp
+                        )
                     }
 
                     if (method == 1) {

@@ -22,3 +22,6 @@ El límite de la resolución personalizada es la **resolución física máxima d
 
 ## Llenar pantalla sin deformar
 En Modo TV y «Todo el sistema», el interruptor mantiene el lado corto de la resolución elegida y calcula el lado largo con la proporción real de la pantalla del teléfono, de modo que la app ocupa toda la pantalla sin bordes y sin deformarse. No deforma la imagen. Con el interruptor apagado se aplica la proporción elegida y es el teléfono quien decide si estira o deja bordes (el «Estirar» de la galería es un modo de su reproductor, no algo que una app pueda aplicar a otra).
+
+## Densidad
+Para que una app se acomode como en otro dispositivo (p. ej. tu tablet), copia su densidad: escribe el «Ancho mínimo» (dp) de la tablet (Opciones de desarrollador) o los dpi directamente. Vacío = automática.

@@ -29,7 +29,7 @@ import kotlin.math.roundToInt
 
 /** orientation: 0 = automática (sigue la rotación), 1 = horizontal, 2 = vertical. scale: 0.3..1 del área máxima. */
 data class CropConfig(val orientation: Int, val ratio: Float, val scale: Float, val target: String? = null, val cover: Float = 1f, val previewMs: Long = 0L,
-    val system: Boolean = false, val sizeW: Int = 0, val sizeH: Int = 0)
+    val system: Boolean = false, val sizeW: Int = 0, val sizeH: Int = 0, val dpi: Int = 0)
 
 /** Dibuja hasta 4 barras negras (izq, arriba, der, abajo) sobre todas las apps. */
 class CropOverlayService : Service() {
@@ -80,7 +80,8 @@ class CropOverlayService : Service() {
             0L,
             intent?.getBooleanExtra(EXTRA_SYSTEM, false) ?: false,
             intent?.getIntExtra(EXTRA_W, 0) ?: 0,
-            intent?.getIntExtra(EXTRA_H, 0) ?: 0
+            intent?.getIntExtra(EXTRA_H, 0) ?: 0,
+            intent?.getIntExtra(EXTRA_DPI, 0) ?: 0
         )
         if (!cfg.system && sysApplied) syncSystem(false)
         val pm = intent?.getLongExtra(EXTRA_PREVIEW, 0L) ?: 0L
@@ -115,8 +116,9 @@ class CropOverlayService : Service() {
         sysBusy = true
         val w = cfg.sizeW
         val h = cfg.sizeH
+        val d = cfg.dpi
         thread {
-            val r = if (desired) displayCtl.apply(w, h) else displayCtl.restore()
+            val r = if (desired) displayCtl.apply(w, h, d) else displayCtl.restore()
             handler.post {
                 sysBusy = false
                 if (r.ok) {
@@ -276,6 +278,7 @@ class CropOverlayService : Service() {
         const val EXTRA_SYSTEM = "system"
         const val EXTRA_W = "size_w"
         const val EXTRA_H = "size_h"
+        const val EXTRA_DPI = "dpi"
         const val EXTRA_PREVIEW = "preview"
         private const val CHANNEL = "crop_overlay"
         private const val NOTIF_ID = 1
