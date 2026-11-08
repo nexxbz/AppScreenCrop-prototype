@@ -19,3 +19,6 @@ Cambia la resolución lógica solo mientras la app elegida (p. ej. Xuper TV) est
 En «Formato» elige **Personalizada** y escribe ancho y alto (320–4096) o usa un atajo (1280×800, 1280×720, 1366×768, 1920×1080). La proporción se calcula de esos valores y se usa tanto en el Modo TV como en las barras.
 
 El límite de la resolución personalizada es la **resolución física máxima de cada teléfono** (se detecta al abrir la app). Si un valor la supera, se rechaza; los formatos automáticos se ajustan al máximo.
+
+## Llenar pantalla sin deformar
+En Modo TV y «Todo el sistema», el interruptor mantiene el lado corto de la resolución elegida y calcula el lado largo con la proporción real de la pantalla del teléfono, de modo que la app ocupa toda la pantalla sin bordes y sin deformarse. No deforma la imagen. Con el interruptor apagado se aplica la proporción elegida y es el teléfono quien decide si estira o deja bordes (el «Estirar» de la galería es un modo de su reproductor, no algo que una app pueda aplicar a otra).

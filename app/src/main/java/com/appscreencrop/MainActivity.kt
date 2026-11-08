@@ -174,6 +174,7 @@ private fun Home(
     var orientation by remember { mutableIntStateOf(0) }
     var scalePct by remember { mutableFloatStateOf(100f) }
     var coverPct by remember { mutableFloatStateOf(100f) }
+    var stretch by rememberSaveable { mutableStateOf(false) }
     var method by remember { mutableIntStateOf(0) }
     var active by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -203,7 +204,14 @@ private fun Home(
     val fit = minOf(1f, maxShort.toFloat() / minOf(raw.first, raw.second), maxLong.toFloat() / maxOf(raw.first, raw.second))
     val limited = customSize == null && fit < 1f
     val base = if (limited) (((raw.first * fit) / 2f).roundToInt() * 2) to (((raw.second * fit) / 2f).roundToInt() * 2) else raw
-    val target = if (orientation == 2) base.second to base.first else base
+    val chosen = if (orientation == 2) base.second to base.first else base
+    // Estirar: se conserva el lado corto de la resolución elegida y el lado largo toma la proporción de la pantalla del teléfono.
+    val stretchOn = stretch && method != 1
+    val target = if (stretchOn) {
+        val ps = minOf(chosen.first, chosen.second)
+        val pl = ((ps * maxLong.toFloat() / maxShort) / 2f).roundToInt() * 2
+        if (chosen.first >= chosen.second) pl to ps else ps to pl
+    } else chosen
 
     val activeConfig = if (method == 0) config.copy(system = true, sizeW = target.first, sizeH = target.second) else config
 
@@ -244,7 +252,7 @@ private fun Home(
         }
     }
 
-    LaunchedEffect(automatic, ratio, customW, customH, orientation, scalePct, coverPct, selected) {
+    LaunchedEffect(automatic, ratio, customW, customH, orientation, scalePct, coverPct, selected, stretch) {
         if (active && method <= 1) onUpdateOverlay(activeConfig)
     }
 
@@ -292,7 +300,7 @@ private fun Home(
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("Resolución seleccionada", color = Color(0xFFBDBDBD), fontSize = 14.sp)
                                 Text("${target.first} × ${target.second}", color = Color(0xFF00C853), fontSize = 38.sp, fontWeight = FontWeight.Bold)
-                                Text("Formato ${if (isCustom) "personalizado" else ratio}", color = Color(0xFFBDBDBD), fontSize = 14.sp)
+                                Text("Formato ${if (isCustom) "personalizado" else ratio}" + if (stretchOn) " · llena la pantalla" else "", color = Color(0xFFBDBDBD), fontSize = 14.sp)
                                 Text("Máximo de este teléfono: $maxLong × $maxShort" + if (limited) " · valor ajustado al máximo" else "", color = Color(0xFF8A8A8A), fontSize = 12.sp)
                             }
                         }
@@ -436,6 +444,21 @@ private fun Home(
                         Text("Escala del área: ${scalePct.toInt()}%", color = Color(0xFFB9CBE4))
                         Slider(value = scalePct, onValueChange = { scalePct = it }, valueRange = 50f..150f)
                         if (method == 1) Text("En barras negras, más de 100% equivale a 100% (el máximo que cabe en pantalla).", color = Soft, fontSize = 12.sp)
+                    }
+
+                    if (method != 1) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Llenar pantalla sin deformar", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (stretch) "Se mantiene la altura de tu resolución (${minOf(chosen.first, chosen.second)} px) y el ancho se adapta a la proporción de tu pantalla: la app ocupa todo, sin bordes ni imagen deformada. Se aplicará ${target.first}×${target.second}."
+                                    else "Desactivado: se aplica la proporción elegida tal cual (${target.first}×${target.second}). Aquí es tu teléfono quien decide si estira la imagen para llenar la pantalla o deja bordes: pruébalo con «Aplicar resolución» y mira qué hace.",
+                                    color = Soft, fontSize = 12.sp
+                                )
+                                Text("El «Estirar» de la galería es un modo de su propio reproductor. Una app no puede deformar a otra: solo cambia la resolución y el sistema decide cómo la muestra.", color = Soft, fontSize = 11.sp)
+                            }
+                            Switch(checked = stretch, onCheckedChange = { stretch = it })
+                        }
                     }
 
                     if (method == 1) {
