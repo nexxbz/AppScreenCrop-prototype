@@ -35,8 +35,11 @@ class DisplayController(context: Context) {
         val long = maxOf(targetW, targetH)
         val physShort = minOf(snap.physW, snap.physH)
         val physLong = maxOf(snap.physW, snap.physH)
-        if (short < 320 || long > physLong * 2) {
-            return Result(false, "Tamaño fuera de rango (${targetW}×${targetH}). No se cambió nada.")
+        val devMax = deviceMax(ctx)
+        val maxShort = maxOf(physShort, devMax.first)
+        val maxLong = maxOf(physLong, devMax.second)
+        if (short < 320 || short > maxShort || long > maxLong) {
+            return Result(false, "Tamaño fuera de rango (${targetW}×${targetH}). Máximo de este teléfono: ${maxLong}×${maxShort}. No se cambió nada.")
         }
         // wm size se expresa en la orientación natural del dispositivo.
         val naturalPortrait = snap.physH >= snap.physW
@@ -165,6 +168,29 @@ class DisplayController(context: Context) {
     }
 
     companion object {
+        /** Resolución física máxima de la pantalla de ESTE teléfono: (lado corto, lado largo). */
+        @Suppress("DEPRECATION")
+        fun deviceMax(context: Context): Pair<Int, Int> {
+            val d = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay
+            var s = 0
+            var l = 0
+            try {
+                for (m in d.supportedModes) {
+                    val ms = minOf(m.physicalWidth, m.physicalHeight)
+                    val ml = maxOf(m.physicalWidth, m.physicalHeight)
+                    if (ms.toLong() * ml > s.toLong() * l) { s = ms; l = ml }
+                }
+            } catch (e: Exception) {
+            }
+            if (s == 0) {
+                val dm = DisplayMetrics()
+                d.getRealMetrics(dm)
+                s = minOf(dm.widthPixels, dm.heightPixels)
+                l = maxOf(dm.widthPixels, dm.heightPixels)
+            }
+            return s to l
+        }
+
         private val LOCK = Any()
         private const val K_APPLIED = "applied"
         private const val K_PW = "phys_w"

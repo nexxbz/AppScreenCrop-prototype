@@ -15,6 +15,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,10 +28,12 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -52,11 +57,13 @@ class MainActivity : ComponentActivity() {
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         val pending = displayCtl.hasAppliedChange()
+        val maxRes = DisplayController.deviceMax(this)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Blue, background = Navy, surface = Color(0xFF1B2C49))) {
                 Home(
                     apps = loadLaunchableApps(),
                     pendingChange = pending,
+                    maxRes = maxRes,
                     onOpenOverlay = { app, cfg -> openWithCrop(app, cfg) },
                     onUpdateOverlay = { cfg -> startOverlay(cfg) },
                     onStopOverlay = { stopService(Intent(this, CropOverlayService::class.java)) },
@@ -148,6 +155,7 @@ private fun baseSize(ratio: Float, scale: Float): Pair<Int, Int> {
 private fun Home(
     apps: List<LaunchableApp>,
     pendingChange: Boolean,
+    maxRes: Pair<Int, Int>,
     onOpenOverlay: (LaunchableApp?, CropConfig) -> Boolean,
     onUpdateOverlay: (CropConfig) -> Unit,
     onStopOverlay: () -> Unit,
@@ -161,6 +169,8 @@ private fun Home(
     var selected by remember { mutableStateOf<LaunchableApp?>(null) }
     var automatic by remember { mutableStateOf(true) }
     var ratio by remember { mutableStateOf("16:10") }
+    var customW by rememberSaveable { mutableStateOf("1280") }
+    var customH by rememberSaveable { mutableStateOf("800") }
     var orientation by remember { mutableIntStateOf(0) }
     var scalePct by remember { mutableFloatStateOf(100f) }
     var coverPct by remember { mutableFloatStateOf(100f) }
@@ -179,9 +189,20 @@ private fun Home(
         mutableStateOf(if (pendingChange) "La app dejó una resolución modificada. Pulsa «Restaurar resolución original»." else "")
     }
 
-    val scale = if (automatic) 1f else scalePct / 100f
-    val config = CropConfig(orientation, ratioOf(ratio), scale.coerceAtMost(1f), selected?.packageName, coverPct / 100f)
-    val base = baseSize(ratioOf(ratio), scale)
+    val isCustom = ratio == "Personalizada"
+    val cw = customW.toIntOrNull()
+    val ch = customH.toIntOrNull()
+    val maxShort = maxRes.first
+    val maxLong = maxRes.second
+    val customSize: Pair<Int, Int>? =
+        if (isCustom && cw != null && ch != null && minOf(cw, ch) >= 320 && minOf(cw, ch) <= maxShort && maxOf(cw, ch) <= maxLong) cw to ch else null
+    val effRatio = customSize?.let { it.first.toFloat() / it.second } ?: ratioOf(ratio)
+    val scale = if (automatic || isCustom) 1f else scalePct / 100f
+    val config = CropConfig(orientation, effRatio, scale.coerceAtMost(1f), selected?.packageName, coverPct / 100f)
+    val raw = customSize ?: baseSize(effRatio, scale)
+    val fit = minOf(1f, maxShort.toFloat() / minOf(raw.first, raw.second), maxLong.toFloat() / maxOf(raw.first, raw.second))
+    val limited = customSize == null && fit < 1f
+    val base = if (limited) (((raw.first * fit) / 2f).roundToInt() * 2) to (((raw.second * fit) / 2f).roundToInt() * 2) else raw
     val target = if (orientation == 2) base.second to base.first else base
 
     val activeConfig = if (method == 0) config.copy(system = true, sizeW = target.first, sizeH = target.second) else config
@@ -193,7 +214,9 @@ private fun Home(
 
     val applyNow: () -> Unit = {
         val app = selected
-        when (method) {
+        if (isCustom && customSize == null) {
+            status = "Escribe un ancho y un alto válidos (mínimo 320; máximo de este teléfono ${maxLong}×${maxShort})."
+        } else when (method) {
             0 -> {
                 if (app == null) {
                     status = "Selecciona la app (por ejemplo Xuper TV)."
@@ -221,7 +244,7 @@ private fun Home(
         }
     }
 
-    LaunchedEffect(automatic, ratio, orientation, scalePct, coverPct, selected) {
+    LaunchedEffect(automatic, ratio, customW, customH, orientation, scalePct, coverPct, selected) {
         if (active && method <= 1) onUpdateOverlay(activeConfig)
     }
 
@@ -269,7 +292,8 @@ private fun Home(
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("Resolución seleccionada", color = Color(0xFFBDBDBD), fontSize = 14.sp)
                                 Text("${target.first} × ${target.second}", color = Color(0xFF00C853), fontSize = 38.sp, fontWeight = FontWeight.Bold)
-                                Text("Formato $ratio", color = Color(0xFFBDBDBD), fontSize = 14.sp)
+                                Text("Formato ${if (isCustom) "personalizado" else ratio}", color = Color(0xFFBDBDBD), fontSize = 14.sp)
+                                Text("Máximo de este teléfono: $maxLong × $maxShort" + if (limited) " · valor ajustado al máximo" else "", color = Color(0xFF8A8A8A), fontSize = 12.sp)
                             }
                         }
                         Text(
@@ -366,12 +390,49 @@ private fun Home(
                     if (method != 1) Text("En los modos de resolución, el tamaño se aplica en la orientación natural del dispositivo y gira con él.", color = Soft, fontSize = 12.sp)
 
                     Text("Formato (se conserva la proporción)", color = Color(0xFFB9CBE4))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("16:10", "16:9", "4:3").forEach { v -> FilterChip(selected = ratio == v, onClick = { ratio = v }, label = { Text(v) }) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                        listOf("16:10", "16:9", "4:3", "Personalizada").forEach { v -> FilterChip(selected = ratio == v, onClick = { ratio = v }, label = { Text(v) }) }
+                    }
+                    if (isCustom) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = customW,
+                                onValueChange = { v -> customW = v.filter { c -> c.isDigit() }.take(4) },
+                                label = { Text("Ancho") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text("×", color = Color.White, fontSize = 20.sp)
+                            OutlinedTextField(
+                                value = customH,
+                                onValueChange = { v -> customH = v.filter { c -> c.isDigit() }.take(4) },
+                                label = { Text("Alto") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                            val presets = (listOf(maxLong to maxShort, 1920 to 1080, 1366 to 768, 1280 to 800, 1280 to 720))
+                                .filter { it.second <= maxShort && it.first <= maxLong }
+                                .distinct()
+                            presets.forEach { (w, h) ->
+                                AssistChip(
+                                    onClick = { customW = "$w"; customH = "$h" },
+                                    label = { Text(if (w == maxLong && h == maxShort) "Máx. $w×$h" else "$w×$h") }
+                                )
+                            }
+                        }
+                        Text(
+                            if (customSize == null) "Escribe valores entre 320 y $maxLong. Máximo de este teléfono: $maxLong×$maxShort."
+                            else "Se aplicará exactamente ${customSize.first}×${customSize.second} (la proporción sale de esos valores).",
+                            color = Soft, fontSize = 12.sp
+                        )
                     }
                     Text("Principal: 16:10 = 1280×800.", color = Soft, fontSize = 12.sp)
 
-                    if (!automatic) {
+                    if (!automatic && !isCustom) {
                         Text("Escala del área: ${scalePct.toInt()}%", color = Color(0xFFB9CBE4))
                         Slider(value = scalePct, onValueChange = { scalePct = it }, valueRange = 50f..150f)
                         if (method == 1) Text("En barras negras, más de 100% equivale a 100% (el máximo que cabe en pantalla).", color = Soft, fontSize = 12.sp)

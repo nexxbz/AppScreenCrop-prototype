@@ -14,3 +14,8 @@ Actions → «Build AppScreen Crop» → Run workflow → artefacto `AppScreenCr
 
 ## Modo TV (recomendado)
 Cambia la resolución lógica solo mientras la app elegida (p. ej. Xuper TV) está en primer plano y la restaura al salir. Necesita permiso elevado: **Shizuku** (sin PC en Android 11+), root o `pm grant ... WRITE_SECURE_SETTINGS` por ADB. Sin ese permiso Android lo niega y la app lo avisa sin cambiar nada.
+
+## Resolución personalizada
+En «Formato» elige **Personalizada** y escribe ancho y alto (320–4096) o usa un atajo (1280×800, 1280×720, 1366×768, 1920×1080). La proporción se calcula de esos valores y se usa tanto en el Modo TV como en las barras.
+
+El límite de la resolución personalizada es la **resolución física máxima de cada teléfono** (se detecta al abrir la app). Si un valor la supera, se rechaza; los formatos automáticos se ajustan al máximo.
